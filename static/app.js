@@ -6,7 +6,7 @@
     'use strict';
 
     // ── Configuration ─────────────────────────────
-    const API_BASE = 'http://localhost:8000';
+    const API_BASE = window.CONFIG?.API_BASE_URL || 'http://localhost:8000';
 
     // ── DOM References ────────────────────────────
     const $ = (sel) => document.querySelector(sel);
