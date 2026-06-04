@@ -1,10 +1,7 @@
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from router.upload import router as upload_router
 from router.chat import router as chat_router
-from utils.cleanup import (delete_document_data)
 from router.cleanup_router import router as delete_document
 
 app = FastAPI(
@@ -23,9 +20,3 @@ app.add_middleware(
 app.include_router(upload_router)
 app.include_router(chat_router)
 app.include_router(delete_document)
-
-@app.get("/")
-async def serve_index():
-    return FileResponse("static/index.html")
-
-app.mount("/static", StaticFiles(directory="static"), name="static")

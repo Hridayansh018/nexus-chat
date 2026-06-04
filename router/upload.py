@@ -7,6 +7,8 @@ from utils.vectorstore import create_index, save_index, save_chunks
 from utils.cleanup import clear_vectorstore, clear_uploads
 import os
 import uuid
+import gc
+
 
 router = APIRouter()
 
@@ -31,11 +33,11 @@ async def upload_file(file: UploadFile = File(...)):
     documents = load_pdf(path)
 
     # debug 2
-    print(
-    repr(
-        documents[0].page_content
-    )
-)
+#     print(
+#     repr(
+#         documents[0].page_content
+#       )
+#     )
     
     # print("First page content:")
     # print(repr(documents[0].page_content[:500]))
@@ -43,21 +45,33 @@ async def upload_file(file: UploadFile = File(...)):
     print("Chunks:", len(chunks))
 
     # debug 1
-    if len(chunks) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="No text chunks could be extracted from the PDF"
-        )
+    # if len(chunks) == 0:
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="No text chunks could be extracted from the PDF"
+    #     )
+
+
     embedding_data = create_chunk_embeddings(chunks)
     vectors = embedding_data['vectors']
     index = create_index(vectors)
     save_index(index, document_id)
     save_chunks(chunks, document_id)
+    pages_count = len(documents)
+    chunks_count = len(chunks)
+
+    del documents
+    del chunks
+    del vectors
+    del embedding_data
+    del index
+
+    gc.collect()
 
     return {
         "message": "PDF processed successfully",
         "filename": file.filename,
         "document_id": document_id,
-        "pages": len(documents),
-        "chunks": len(chunks)
+        "pages": pages_count,
+        "chunks": chunks_count
     }

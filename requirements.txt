@@ -1,4 +1,3 @@
-langchain
 langchain-core
 langchain-community
 pypdf
@@ -10,6 +9,5 @@ python-dotenv
 pydantic
 sentence-transformers
 faiss-cpu
-chromadb
 langchain-openai
 python-multipart
