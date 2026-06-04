@@ -1,5 +1,6 @@
 import os
 import shutil
+import gc
 
 
 def delete_document_data(document_id: str):
