@@ -1,0 +1,60 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# UV
+.python-version
+
+# Environment variables
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.pyre/
+.ruff_cache/
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+
+# ChromaDB / Vector DB (optional)
+chroma_db/
+data/vector_store/
+
+# Model files (optional)
+models/
