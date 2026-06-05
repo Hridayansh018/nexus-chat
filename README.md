@@ -10,10 +10,12 @@ A FastAPI-based Retrieval-Augmented Generation (RAG) system that lets you upload
 
 ## Tech Stack
 
-- **Backend:** FastAPI, LangChain, FAISS, Sentence-Transformers
+- **Backend:** FastAPI, LangChain, FAISS
 - **Frontend:** Vanilla JavaScript with streaming responses
 - **LLM:** OpenRouter API (`openai/gpt-oss-120b:free`)
-- **Embedding Model:** `all-MiniLM-L6-v2`
+- **Embeddings:** Hugging Face Inference API
+- **Embedding Model:** `sentence-transformers/all-MiniLM-L6-v2`
+- **Vector Search:** FAISS (cosine similarity)
 
 ---
 
@@ -34,7 +36,7 @@ chat_with_pdf/
 │   └── cleanup_router.py      # GET/DELETE /documents/{document_id}
 │
 ├── utils/                     # Business logic & pipelines
-│   ├── embeddings.py          # Vector embedding generation (SentenceTransformers)
+│   ├── embeddings.py          # Hugging Face Inference API embeddings
 │   ├── llmclient.py           # LLM client initialization (OpenRouter)
 │   ├── pdfloader.py           # PDF text extraction (PyPDF)
 │   ├── rag.py                 # RAG pipeline with streaming responses
@@ -43,7 +45,7 @@ chat_with_pdf/
 │   ├── vectorstore.py         # FAISS index CRUD operations
 │   └── cleanup.py             # Memory cleanup utilities
 │
-├── static/                    # Frontend files
+├── public/                    # Frontend files
 │   ├── index.html             # Main UI with upload & chat
 │   ├── app.js                 # Frontend logic, API calls, streaming handler
 │   ├── styles.css             # UI styling & animations
@@ -120,7 +122,7 @@ curl -X POST http://localhost:8000/upload-file/ \
 4. **Line 28-31:** Save PDF to `uploads/{document_id}/filename.pdf`
 5. **Line 33:** Extract text from PDF using PyPDFLoader → Document objects
 6. **Line 44-45:** Split text into overlapping chunks (1000 chars, 200 overlap)
-7. **Line 55-57:** Generate embeddings for all chunks using SentenceTransformers
+7. **Line 55-57:** Generate embeddings for all chunks using Hugging Face Inference API
 8. **Line 58-59:** Create FAISS index, save index & chunks to `vector_db/{document_id}/`
 9. **Line 60-62:** Get page & chunk counts
 10. **Line 63-65:** **Memory optimization** — Delete large objects (`documents`, `chunks`, `vectors`) to free RAM
@@ -206,55 +208,58 @@ curl -X DELETE http://localhost:8000/documents/550e8400-e29b-41d4-a716-446655440
 
 ### **1. `utils/embeddings.py`** — Text to Vector Conversion
 
-**Functions:**
+Vector embeddings are generated using the Hugging Face Inference API instead of loading embedding models locally.
+
+This significantly reduces server memory usage and improves deployment reliability on platforms such as Render Free Tier.
+
+#### Functions
 
 | Function | Purpose |
-|----------|---------|
-| `get_embedding_model()` | Returns SentenceTransformer model instance |
-| `create_embeddings(texts)` | Convert list of strings to embedding vectors |
-| `embed_query(q)` | Convert single query string to embedding vector |
-| `create_chunk_embeddings(chunks)` | Convert document chunks to embeddings with metadata |
+|-----------|----------|
+| `create_embeddings(texts)` | Generate embeddings for multiple texts |
+| `embed_query(query)` | Generate embedding for a user query |
+| `create_chunk_embeddings(chunks)` | Generate embeddings for document chunks |
 
-**Line-by-Line Breakdown:**
+#### Example Implementation
 
 ```python
-# Line 1-2: Imports
-from sentence_transformers import SentenceTransformer
+from huggingface_hub import InferenceClient
 import numpy as np
+import os
 
-# Line 4: Load embedding model once (reused for all requests)
-embedding_manager = SentenceTransformer('all-MiniLM-L6-v2')
+client = InferenceClient(
+    provider="hf-inference",
+    api_key=os.getenv("HF_TOKEN")
+)
 
-# Line 6-7: Getter for model instance
-def get_embedding_model():
-    return embedding_manager
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# Line 9-15: Embed multiple texts at once
-def create_embeddings(texts: list[str]) -> np.ndarray:
-    embeddings = embedding_manager.encode(
-        texts,  # List of strings
-        convert_to_numpy=True,  # Return numpy array
-        normalize_embeddings=True  # L2 normalization for cosine similarity
+def create_embeddings(texts):
+    vectors = client.feature_extraction(
+        texts,
+        model=EMBEDDING_MODEL
     )
-    return embeddings
+    return np.array(vectors)
 
-# Line 18-24: Embed single query (reshapes to 2D for FAISS)
-def embed_query(q: str) -> np.ndarray:
-    embedding = embedding_manager.encode(
-        q,
-        convert_to_numpy=True,
-        normalize_embeddings=True
+def embed_query(query):
+    vector = client.feature_extraction(
+        query,
+        model=EMBEDDING_MODEL
     )
-    return embedding.reshape(1, -1)  # Convert (384,) → (1, 384)
+    return np.array(vector).reshape(1, -1)
 
-# Line 26-38: Process chunks from document splitter
 def create_chunk_embeddings(chunks):
-    texts = [chunk.page_content for chunk in chunks]  # Extract text
-    vectors = embedding_manager.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+    texts = [chunk.page_content for chunk in chunks]
+
+    vectors = client.feature_extraction(
+        texts,
+        model=EMBEDDING_MODEL
+    )
+
     return {
-        "texts": texts,  # Original text
-        "vectors": vectors,  # Embedding vectors
-        "metadata": [chunk.metadata for chunk in chunks]  # Page numbers, etc.
+        "texts": texts,
+        "vectors": np.array(vectors),
+        "metadata": [chunk.metadata for chunk in chunks]
     }
 ```
 
@@ -507,18 +512,25 @@ def clear_uploads():
 
 **Required `.env` file:**
 ```
-OPENROUTER_API_KEY=your-api-key-here
+OPENROUTER_API_KEY=your-openrouter-api-key
+HF_TOKEN=your-huggingface-access-token
 ```
 
 **Frontend configuration (static/config.js):**
+
+For local development:
 ```javascript
 window.CONFIG = {
-    API_BASE_URL: process.env.REACT_APP_API_URL || 'http://localhost:8000'
+    API_BASE_URL: "http://localhost:8000"
 };
 ```
 
-**Development:** `http://localhost:8000`
-**Production:** Set `REACT_APP_API_URL` in deployment platform
+For production:
+```javascript
+window.CONFIG = {
+    API_BASE_URL: "https://your-render-app.onrender.com"
+};
+```
 
 ---
 
@@ -529,7 +541,7 @@ window.CONFIG = {
 | **LLM Model** | `openai/gpt-oss-120b:free` | Free open-source model via OpenRouter |
 | **Temperature** | 0.7 | Balanced creativity & consistency |
 | **Max Tokens** | 1024 | Max response length |
-| **Embedding Model** | `all-MiniLM-L6-v2` | Fast, accurate, 384-dimensional |
+| **Embedding Model** | `sentence-transformers/all-MiniLM-L6-v2` | Hosted via Hugging Face Inference API |
 | **Chunk Size** | 1000 | Characters per chunk |
 | **Chunk Overlap** | 200 | Context overlap between chunks |
 | **Top-K Retrieval** | 5 | Most relevant chunks per query |
@@ -541,7 +553,19 @@ window.CONFIG = {
 
 ```
 Upload Document:
-  PDF File → PyPDFLoader → Splitter → Embeddings → FAISS Index + Chunks → ✅ Success
+  PDF File
+    ↓
+  PyPDFLoader
+    ↓
+  Text Splitter
+    ↓
+  Hugging Face Inference API
+    ↓
+  Embeddings
+    ↓
+  FAISS Index + Chunks
+    ↓
+  ✅ Success
 
 Ask Question:
   Question → Embedding → FAISS Search → Retrieve 5 Chunks → Build Context 
@@ -605,30 +629,61 @@ Each document gets a unique UUID directory containing:
 
 ## ⚙️ Memory Optimization Techniques
 
-The application uses several memory optimizations for deployment on limited resources:
+The application is optimized for deployment on low-memory environments such as Render Free Tier.
 
-1. **Lazy Loading** (embeddings.py):
-   - SentenceTransformer model loaded once, reused for all requests
-   - LLM client created once at startup
+### 1. Remote Embeddings
 
-2. **Explicit Garbage Collection** (upload.py):
-   ```python
-   del documents  # Delete large Document objects
-   del chunks     # Delete large text chunks
-   del vectors    # Delete large embedding matrices
-   ```
+Embeddings are generated using the Hugging Face Inference API.
 
-3. **Cleanup on Upload** (upload.py):
-   - `clear_vectorstore()` removes old indexes before new upload
-   - Prevents memory bloat from multiple documents
+Benefits:
 
-4. **Environment Variable** (upload.py):
-   - Import `gc` module for forced garbage collection if needed
+- No local SentenceTransformer models
+- No PyTorch model loading
+- Lower RAM usage
+- Faster startup times
+- Better deployment reliability
 
-**For Render Free Tier (~512MB):**
-- Suitable for small-to-medium PDFs (<50 pages)
-- May need to use vector DB service (Pinecone) for larger applications
-- Consider splitting into microservices for scale
+### 2. Explicit Memory Cleanup
+
+After PDF processing:
+
+```python
+del documents
+del chunks
+del vectors
+del embedding_data
+del index
+
+gc.collect()
+```
+
+This frees large objects immediately after processing.
+
+### 3. FAISS Persistence
+
+FAISS indexes are stored on disk instead of remaining in memory.
+
+### 4. Streaming Responses
+
+LLM responses are streamed token-by-token to reduce memory consumption and improve responsiveness.
+
+### 5. Suitable For Free-Tier Hosting
+
+Current architecture:
+
+Frontend (Vercel)
+↓
+FastAPI Backend (Render)
+↓
+Hugging Face Inference API (Embeddings)
+↓
+FAISS Retrieval
+↓
+OpenRouter LLM
+
+This architecture avoids loading large embedding models into server memory and is significantly more deployment-friendly than local SentenceTransformer setups.
+
+---
 
 MIT
 
