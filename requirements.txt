@@ -2,10 +2,12 @@ fastapi
 uvicorn
 python-dotenv
 python-multipart
+pydantic
 openai
 langchain-openai
-sentence-transformers
-faiss-cpu
+langchain-core
+langchain-community
 pypdf
 pymupdf
-langchain-community
+faiss-cpu
+huggingface_hub

@@ -1,48 +1,45 @@
-from sentence_transformers import SentenceTransformer
+from huggingface_hub import InferenceClient
 import numpy as np
+import os
 
-_embedding_manager = None
+client = InferenceClient(
+    provider="hf-inference",
+    api_key=os.getenv("HF_TOKEN")
+)
 
-def get_embedding_model():
-    global _embedding_manager
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-    if _embedding_manager is None:
-        _embedding_manager = SentenceTransformer(
-            "all-MiniLM-L6-v2"
-        )
-
-    return _embedding_manager
 
 def create_embeddings(texts: list[str]) -> np.ndarray:
-    model = get_embedding_model()
-    embeddings = model.encode(
+    vectors = client.feature_extraction(
         texts,
-        convert_to_numpy=True,
-        normalize_embeddings=True 
+        model=EMBEDDING_MODEL
     )
-    return embeddings
+
+    return np.array(vectors)
 
 
-def embed_query(q:str)->np.ndarray:
-    model = get_embedding_model()
-    embedding = model.encode(
+def embed_query(q: str) -> np.ndarray:
+    vector = client.feature_extraction(
         q,
-        convert_to_numpy=True,
-        normalize_embeddings=True
+        model=EMBEDDING_MODEL
     )
-    return embedding.reshape(1, -1)
+
+    return np.array(vector).reshape(1, -1)
+
 
 def create_chunk_embeddings(chunks):
-    model = get_embedding_model()
     texts = [chunk.page_content for chunk in chunks]
-    vectors = model.encode(
+
+    vectors = client.feature_extraction(
         texts,
-        convert_to_numpy=True,
-        normalize_embeddings=True
+        model=EMBEDDING_MODEL
     )
 
+    vectors = np.array(vectors)
+
     return {
-        "texts":texts,
-        "vectors":vectors,
-        "metadata":[chunk.metadata for chunk in chunks]     
+        "texts": texts,
+        "vectors": vectors,
+        "metadata": [chunk.metadata for chunk in chunks]
     }
