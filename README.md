@@ -21,35 +21,36 @@ A FastAPI-based Retrieval-Augmented Generation (RAG) system that lets you upload
 
 ```
 chat_with_pdf/
-├── main.py                    # FastAPI app entry point
+├── main.py                    # FastAPI app entry point, CORS middleware
 ├── schema.py                  # Pydantic request/response models
 ├── .env                       # Environment variables (API keys)
 ├── .env.example               # Example environment config
 ├── requirements.txt           # Python dependencies
+├── pyproject.toml             # Project metadata
 │
 ├── router/                    # API endpoints
 │   ├── upload.py              # POST /upload-file/ - PDF upload & processing
-│   ├── chat.py                # POST /chat/ - Question answering
+│   ├── chat.py                # POST /chat/ - Question answering (streaming)
 │   └── cleanup_router.py      # GET/DELETE /documents/{document_id}
 │
 ├── utils/                     # Business logic & pipelines
-│   ├── embeddings.py          # Vector embedding generation
-│   ├── llmclient.py           # LLM client initialization
-│   ├── pdfloader.py           # PDF text extraction
-│   ├── rag.py                 # RAG pipeline & streaming
-│   ├── retriever.py           # Semantic search for chunks
-│   ├── splitter.py            # Text chunking strategy
-│   ├── vectorstore.py         # FAISS index management
-│   └── cleanup.py             # Cleanup utilities
+│   ├── embeddings.py          # Vector embedding generation (SentenceTransformers)
+│   ├── llmclient.py           # LLM client initialization (OpenRouter)
+│   ├── pdfloader.py           # PDF text extraction (PyPDF)
+│   ├── rag.py                 # RAG pipeline with streaming responses
+│   ├── retriever.py           # Semantic search for chunks (FAISS)
+│   ├── splitter.py            # Text chunking strategy (1000 chars, 200 overlap)
+│   ├── vectorstore.py         # FAISS index CRUD operations
+│   └── cleanup.py             # Memory cleanup utilities
 │
 ├── static/                    # Frontend files
-│   ├── index.html             # Main UI
-│   ├── app.js                 # Frontend logic & API calls
-│   ├── styles.css             # UI styling
-│   └── config.js              # API configuration
+│   ├── index.html             # Main UI with upload & chat
+│   ├── app.js                 # Frontend logic, API calls, streaming handler
+│   ├── styles.css             # UI styling & animations
+│   └── config.js              # Environment-based API configuration
 │
-├── uploads/                   # Uploaded PDFs (organized by document_id)
-└── vector_db/                 # FAISS indexes (organized by document_id)
+├── uploads/                   # Uploaded PDFs (organized by document_id/filename)
+└── vector_db/                 # FAISS indexes (organized by document_id/)
 ```
 
 ---
@@ -93,7 +94,7 @@ Access at: `http://localhost:5500`
 
 ### **1. POST `/upload-file/`** — Upload & Process PDF
 
-**File:** `router/upload.py` (lines 13-63)
+**File:** `router/upload.py` (lines 15-73)
 
 **Request:**
 ```bash
@@ -113,15 +114,22 @@ curl -X POST http://localhost:8000/upload-file/ \
 ```
 
 **Process Flow:**
-1. **Line 14-19:** Validate file is PDF, reject if not
-2. **Line 20:** Clear old vector stores
-3. **Line 22-24:** Generate unique document ID, create document directory
-4. **Line 27-29:** Save PDF to `uploads/{document_id}/`
-5. **Line 31:** Extract text from PDF using PyPDFLoader
-6. **Line 41-42:** Split text into overlapping chunks (1000 chars, 200 overlap)
-7. **Line 50-52:** Generate embeddings for all chunks
-8. **Line 53-56:** Create FAISS index, save index & chunks to `vector_db/{document_id}/`
-9. **Line 58-63:** Return metadata with `document_id`
+1. **Line 16-21:** Validate file is PDF, reject if not
+2. **Line 22:** Clear old vector stores to free memory
+3. **Line 24-26:** Generate unique document ID, create document directory
+4. **Line 28-31:** Save PDF to `uploads/{document_id}/filename.pdf`
+5. **Line 33:** Extract text from PDF using PyPDFLoader → Document objects
+6. **Line 44-45:** Split text into overlapping chunks (1000 chars, 200 overlap)
+7. **Line 55-57:** Generate embeddings for all chunks using SentenceTransformers
+8. **Line 58-59:** Create FAISS index, save index & chunks to `vector_db/{document_id}/`
+9. **Line 60-62:** Get page & chunk counts
+10. **Line 63-65:** **Memory optimization** — Delete large objects (`documents`, `chunks`, `vectors`) to free RAM
+11. **Line 67-73:** Return metadata with `document_id`
+
+**Memory Optimizations (NEW):**
+- Line 10: `import gc` — Garbage collection
+- Line 63-65: Explicit deletion of large variables after use
+- Reduces memory footprint for limited-resource deployments (Render, etc.)
 
 ---
 
@@ -448,9 +456,16 @@ Question: {q}"""
 
 ### **8. `utils/cleanup.py`** — Cleanup Utilities
 
+**Functions:**
+
 ```python
+# Line 1-3: Imports
+import os
+import shutil
+import gc  # Garbage collection for memory optimization
+
 def delete_document_data(document_id: str):
-    # Delete entire document directory from uploads
+    # Delete entire document directory from uploads (organized by document_id)
     upload_path = f"uploads/{document_id}"
     if os.path.isdir(upload_path):
         shutil.rmtree(upload_path)  # Recursive delete
@@ -458,28 +473,33 @@ def delete_document_data(document_id: str):
         os.remove(upload_path)
 
 def clear_vectorstore():
-    # Delete all vector databases
+    # Delete all vector databases (organized by document_id directories)
     vector_db_path = "vector_db"
     if os.path.isdir(vector_db_path):
-        for item in os.listdir(vector_db_path):
+        for item in os.listdir(vector_db_path):  # Each item is a document_id
             item_path = os.path.join(vector_db_path, item)
             if os.path.isdir(item_path):
-                shutil.rmtree(item_path)  # Delete document's vector dir
+                shutil.rmtree(item_path)  # Delete document's FAISS index & chunks
             elif os.path.isfile(item_path):
                 os.remove(item_path)
         if not os.listdir(vector_db_path):
             os.rmdir(vector_db_path)  # Remove empty dir
 
 def clear_uploads():
-    # Delete all uploaded documents
+    # Delete all uploaded documents (organized by document_id directories)
     if os.path.isdir("uploads"):
-        for item in os.listdir("uploads"):
+        for item in os.listdir("uploads"):  # Each item is a document_id
             item_path = os.path.join("uploads", item)
             if os.path.isdir(item_path):
-                shutil.rmtree(item_path)
+                shutil.rmtree(item_path)  # Delete document directory & PDF
             elif os.path.isfile(item_path):
                 os.remove(item_path)
 ```
+
+**Memory Optimizations (NEW):**
+- Line 3: `import gc` — Garbage collection module available for use
+- Used with `del` statements in upload.py (line 63-65) to free large objects
+- Critical for limited-resource deployments (Render, Heroku, etc.)
 
 ---
 
@@ -536,17 +556,79 @@ Ask Question:
 1. Push to GitHub
 2. Connect to Vercel
 3. Set environment variable: `REACT_APP_API_URL=<backend-url>`
+4. Deploy (frontend files only from `static/` folder)
 
-### Backend (Railway/Render)
+### Backend (Render or Railway)
+
+**Render Start Command:**
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+**Steps:**
 1. Push to GitHub
-2. Deploy on Railway or Render
-3. Set `OPENROUTER_API_KEY` environment variable
-4. Get backend URL
-5. Update frontend API_BASE_URL
+2. Create new Web Service on Render/Railway
+3. Set **Start Command** (see above)
+4. Set environment variables:
+   - `OPENROUTER_API_KEY=your-api-key`
+5. Deploy
+6. Get backend URL (e.g., `https://your-app.onrender.com`)
+7. Update frontend config: `REACT_APP_API_URL=https://your-app.onrender.com`
+
+**Deployment Notes:**
+- Remove `--reload` for production (breaks on free tier with limited memory)
+- Memory optimization in code (gc, del statements) helps with free tier constraints
+- Use `--host 0.0.0.0` to listen on all interfaces (required for cloud hosting)
+- CORS is enabled for all origins in production (`allow_origins=["*"]`)
 
 ---
 
-## 📝 License
+## 💾 Storage Structure
+
+**Document Organization:**
+```
+uploads/
+├── 550e8400-e29b-41d4-a716-446655440000/
+│   └── document.pdf
+
+vector_db/
+├── 550e8400-e29b-41d4-a716-446655440000/
+│   ├── index.faiss
+│   └── chunks.pkl
+```
+
+Each document gets a unique UUID directory containing:
+- **uploads/{document_id}/** — Original PDF file
+- **vector_db/{document_id}/** — FAISS index & chunked data
+
+---
+
+## ⚙️ Memory Optimization Techniques
+
+The application uses several memory optimizations for deployment on limited resources:
+
+1. **Lazy Loading** (embeddings.py):
+   - SentenceTransformer model loaded once, reused for all requests
+   - LLM client created once at startup
+
+2. **Explicit Garbage Collection** (upload.py):
+   ```python
+   del documents  # Delete large Document objects
+   del chunks     # Delete large text chunks
+   del vectors    # Delete large embedding matrices
+   ```
+
+3. **Cleanup on Upload** (upload.py):
+   - `clear_vectorstore()` removes old indexes before new upload
+   - Prevents memory bloat from multiple documents
+
+4. **Environment Variable** (upload.py):
+   - Import `gc` module for forced garbage collection if needed
+
+**For Render Free Tier (~512MB):**
+- Suitable for small-to-medium PDFs (<50 pages)
+- May need to use vector DB service (Pinecone) for larger applications
+- Consider splitting into microservices for scale
 
 MIT
 

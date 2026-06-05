@@ -218,7 +218,7 @@ body {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--warning);
+    background: var(--success);
     animation: statusPulse 2s ease-in-out infinite;
 }
 
@@ -232,8 +232,14 @@ body {
 }
 
 @keyframes statusPulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); }
-    50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(251, 191, 36, 0); }
+    0%, 100% {
+        opacity: 1;
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+    }
+    50% {
+        opacity: 0.7;
+        box-shadow: 0 0 0 4px rgba(34, 197, 94, 0);
+    }
 }
 
 /* ── Main Content ──────────────────────────────── */
